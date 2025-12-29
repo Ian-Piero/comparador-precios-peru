@@ -5,22 +5,18 @@ import json
 from groq import Groq
 import os
 
-# --- 1. CONFIGURACIÓN DE SEGURIDAD ---
-# Asegúrate de tener esta clave en Streamlit Cloud -> Settings -> Secrets
-API_KEY = st.secrets["GROQ_API_KEY"]
+# --- CONFIGURACIÓN ---
+# En EC2, pasaremos la API_KEY como variable de entorno en el comando Docker
+API_KEY = os.getenv("GROQ_API_KEY")
 
 st.set_page_config(page_title="Comparador Tech Perú", page_icon="⚙️", layout="wide")
 st.title("⚙️ Comparador de productos")
+st.markdown("Corriendo en AWS EC2 con Docker")
 
-# --- 2. FUNCIÓN DE EXTRACCIÓN (Aquí es donde vive el 'await') ---
 async def extraer_datos_asincrono(producto):
-    # Instalamos el navegador solo si no existe (dentro de la lógica asíncrona)
-    if not os.path.exists("/home/appuser/.cache/ms-playwright"):
-        os.system("playwright install chromium")
-
     resultados = []
     async with async_playwright() as p:
-        # Aquí el 'await' sí funciona porque estamos dentro de 'async def'
+        # Argumentos necesarios para contenedores Linux
         browser = await p.chromium.launch(
             headless=True,
             args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
@@ -61,7 +57,6 @@ async def extraer_datos_asincrono(producto):
         await browser.close()
     return resultados
 
-# --- 3. PROCESADOR IA ---
 def comparar_con_ia(lista_productos, key):
     client = Groq(api_key=key)
     prompt = f"Genera un JSON con la llave 'productos' (tienda, nombre, precio, enlace). Datos: {chr(10).join(lista_productos)}"
@@ -72,22 +67,23 @@ def comparar_con_ia(lista_productos, key):
     )
     return completion.choices[0].message.content
 
-# --- 4. INTERFAZ (Ejecuta la lógica asíncrona) ---
 producto_buscado = st.text_input("¿Qué producto buscas?")
 
 if st.button("🔍 Buscar"):
     if producto_buscado:
-        try:
-            with st.spinner("Buscando ofertas..."):
-                # Esta es la forma correcta de llamar a una función 'async' desde Streamlit
-                bloques = asyncio.run(extraer_datos_asincrono(producto_buscado))
-            
-            if bloques:
-                with st.spinner("IA analizando precios..."):
-                    respuesta_json = comparar_con_ia(bloques, API_KEY)
-                    datos = json.loads(respuesta_json)
-                    st.dataframe(datos.get("productos", []), hide_index=True, width="stretch")
-            else:
-                st.error("No se encontraron resultados.")
-        except Exception as e:
-            st.error(f"Error técnico: {e}")
+        if not API_KEY:
+            st.error("Falta la API Key de Groq en las variables de entorno.")
+        else:
+            try:
+                with st.spinner("Buscando ofertas..."):
+                    bloques = asyncio.run(extraer_datos_asincrono(producto_buscado))
+                
+                if bloques:
+                    with st.spinner("IA analizando precios..."):
+                        respuesta_json = comparar_con_ia(bloques, API_KEY)
+                        datos = json.loads(respuesta_json)
+                        st.dataframe(datos.get("productos", []), hide_index=True, width="stretch")
+                else:
+                    st.error("No se encontraron resultados.")
+            except Exception as e:
+                st.error(f"Error técnico: {e}")
