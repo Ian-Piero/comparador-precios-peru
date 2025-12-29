@@ -3,12 +3,19 @@ import asyncio
 from playwright.async_api import async_playwright
 import json
 from groq import Groq
-import os
+import os  # <--- Asegúrate de que este import esté aquí
+
+# ==========================================
+# AQUÍ VA EL PASO 3:
+# ==========================================
+if "browser_installed" not in st.session_state:
+    os.system("playwright install chromium")
+    st.session_state["browser_installed"] = True
+# ==========================================
 
 # --- CONFIGURACIÓN ESTATICA ---
 # Cargamos la API Key desde los Secrets de Streamlit
 API_KEY = st.secrets["GROQ_API_KEY"]
-
 st.set_page_config(page_title="Comparador Tech Perú", page_icon="⚙️", layout="wide")
 
 st.title("⚙️ Comparador de productos")
@@ -112,3 +119,4 @@ if st.button("🔍 Buscar"):
                 st.error("No se encontraron resultados válidos.")
         except Exception as e:
             st.error(f"Hubo un problema técnico: {e}")
+
