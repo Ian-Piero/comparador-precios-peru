@@ -12,7 +12,16 @@ if "browser_installed" not in st.session_state:
     os.system("playwright install chromium")
     st.session_state["browser_installed"] = True
 # ==========================================
-
+browser = await p.chromium.launch(
+    headless=True,
+    args=[
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',  # <--- Agregado
+        '--disable-software-rasterizer' # <--- Agregado
+    ]
+)
 # --- CONFIGURACIÓN ESTATICA ---
 # Cargamos la API Key desde los Secrets de Streamlit
 API_KEY = st.secrets["GROQ_API_KEY"]
@@ -119,4 +128,5 @@ if st.button("🔍 Buscar"):
                 st.error("No se encontraron resultados válidos.")
         except Exception as e:
             st.error(f"Hubo un problema técnico: {e}")
+
 
