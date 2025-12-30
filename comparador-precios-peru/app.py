@@ -33,8 +33,10 @@ async def extraer_tienda(context, url, tienda_nombre, selector_items):
         for item in items[:10]:
             try:
                 texto = await item.inner_text()
-                # Limpieza agresiva de saltos de linea
-                texto_limpio = " ".join(texto.split())[:500]
+                # Eliminamos espacios múltiples y saltos de línea molestos
+                texto_limpio = " ".join(texto.split())
+                # Solo nos quedamos con los primeros 300 caracteres (suficiente para nombre y precio)
+                texto_limpio = texto_limpio.strip()[:300]
                 
                 link_elem = await item.query_selector('a')
                 link = await link_elem.get_attribute('href') if link_elem else ""
@@ -103,22 +105,35 @@ asyncio.run(run())
 
 def comparar_con_ia(lista_productos, key):
     client = Groq(api_key=key)
-    # Prompt optimizado para que no ignore ninguna tienda
-    prompt = f"""
-    Analiza estos datos de tiendas en Perú. Crea un JSON con la llave "productos".
-    CADA producto debe tener: "tienda", "nombre", "precio" (solo numero), "enlace".
-    No inventes datos. Si no hay precio, pon null.
     
-    DATOS:
-    {chr(10).join(lista_productos)}
+    # Reducimos la cantidad de datos para no saturar a la IA
+    datos_resumidos = "\n".join(lista_productos[:15]) 
+    
+    prompt = f"""
+    Actúa como un extractor de datos preciso. 
+    Tu tarea es convertir el texto de tiendas de Perú en un objeto JSON.
+    
+    Reglas estrictas:
+    1. Devuelve SOLAMENTE un JSON con la estructura: {{"productos": [{{"tienda": "", "nombre": "", "precio": 0, "enlace": ""}}]}}
+    2. El campo "precio" debe ser un número entero o decimal (sin "S/.", sin comas).
+    3. Si no encuentras el precio, pon null.
+    4. No añadas explicaciones ni texto fuera del JSON.
+    
+    Datos a procesar:
+    {datos_resumidos}
     """
     
-    completion = client.chat.completions.create(
-        messages=[{"role": "user", "content": prompt}],
-        model="llama-3.3-70b-versatile",
-        response_format={"type": "json_object"}
-    )
-    return completion.choices[0].message.content
+    try:
+        completion = client.chat.completions.create(
+            messages=[{"role": "user", "content": prompt}],
+            model="llama-3.3-70b-versatile", # Modelo potente para seguir instrucciones
+            temperature=0.1, # Menos creatividad = más precisión en el formato
+            response_format={"type": "json_object"}
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        print(f"Error en Groq: {e}")
+        return '{ "productos": [] }'
 
 producto_buscado = st.text_input("¿Qué producto buscas?", placeholder="Ej: Laptop, Smartwatch...")
 
@@ -152,3 +167,4 @@ if st.button("🔍 Buscar"):
                 st.error("Las tiendas (ML y Coolbox) bloquearon la conexión o no hay resultados.")
         except Exception as e:
             st.error(f"Error general: {e}")
+
