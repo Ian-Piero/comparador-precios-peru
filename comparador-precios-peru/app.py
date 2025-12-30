@@ -5,87 +5,45 @@ import os
 import json
 from groq import Groq
 
-# --- CONFIGURACIÓN ESTATICA ---
+# --- CONFIGURACIÓN ---
 API_KEY_DIRECTA = "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"
 
-st.set_page_config(page_title="Comparador Tech Perú", page_icon="⚙️", layout="wide")
-st.title("⚙️ Comparador de productos")
-st.markdown("Buscando en tiendas locales con IA.")
+st.set_page_config(page_title="Comparador Global Perú", page_icon="🌐", layout="wide")
+st.title("🌐 Comparador Inteligente (Búsqueda Global)")
+st.markdown("Buscando en la web y procesando con IA.")
 
-def buscar_y_extraer(producto):
-    script_temp = "buscador_tech.py"
+def buscar_en_la_web(producto):
+    script_temp = "buscador_global.py"
     
+    # Este script busca en Google los resultados de las tiendas peruanas
     codigo_extractor = f"""
 import asyncio
 from playwright.async_api import async_playwright
 
-async def extraer_tienda(context, url, tienda_nombre, selector_items):
-    page = await context.new_page()
-    # Simular comportamiento humano moviendo el mouse o scroll
-    resultados = []
-    try:
-        await page.goto(url, wait_until='networkidle', timeout=45000)
-        await page.wait_for_timeout(4000) 
-        
-        items = await page.query_selector_all(selector_items)
-        print(f"DEBUG: {{tienda_nombre}} encontro {{len(items)}} items")
-        
-        for item in items[:10]:
-            try:
-                texto = await item.inner_text()
-                # Eliminamos espacios múltiples y saltos de línea molestos
-                texto_limpio = " ".join(texto.split())
-                # Solo nos quedamos con los primeros 300 caracteres (suficiente para nombre y precio)
-                texto_limpio = texto_limpio.strip()[:300]
-                
-                link_elem = await item.query_selector('a')
-                link = await link_elem.get_attribute('href') if link_elem else ""
-                
-                if link and link.startswith('/'):
-                    if "coolbox" in url: link = "https://www.coolbox.pe" + link
-                    elif "hiraoka" in url: link = "https://hiraoka.com.pe" + link
-                
-                if len(texto_limpio) > 50:
-                    resultados.append(f"TIENDA: {{tienda_nombre}} | DATOS: {{texto_limpio}} | LINK: {{link}}")
-            except:
-                continue
-    except Exception as e:
-        print(f"Error en {{tienda_nombre}}: {{e}}")
-    finally:
-        await page.close()
-    return resultados
-
 async def run():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True, 
-            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-        )
-        # User agent actualizado y headers de lenguaje para evitar bloqueos
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-            extra_http_headers={{"Accept-Language": "es-PE,es;q=0.9"}}
-        )
+        browser = await p.chromium.launch(headless=True, args=['--no-sandbox'])
+        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0")
+        page = await context.new_page()
         
-        q = "{producto.replace(' ', '+')}"
+        # Construimos una busqueda que abarque tus tiendas favoritas en Peru
+        query = 'site:mercadolibre.com.pe OR site:coolbox.pe OR site:hiraoka.com.pe "{producto}"'
+        search_url = f"https://www.google.com/search?q={{query.replace(' ', '+')}}"
         
-        tareas = [
-            # Mercado Libre: Selector mas robusto para la nueva version
-            extraer_tienda(context, f"https://listado.mercadolibre.com.pe/{{q.replace('+', '-')}}", "Mercado Libre", "li.ui-search-layout__item"),
-            
-            # Coolbox: Selector actualizado a su contenedor de productos principal
-            extraer_tienda(context, f"https://www.coolbox.pe/{{q}}?_q={{q}}&map=ft", "Coolbox", "div.vtex-search-result-3-x-galleryItem"),
-            
-            # Hiraoka
-            extraer_tienda(context, f"https://hiraoka.com.pe/catalogsearch/result/?q={{q}}", "Hiraoka", ".product-item-info")
-        ]
+        await page.goto(search_url, wait_until='networkidle')
         
-        listas = await asyncio.gather(*tareas)
-        total = [item for sublist in listas for item in sublist]
+        # Extraemos los bloques de resultados de Google (título, link y descripción)
+        resultados = []
+        items = await page.query_selector_all('div.g')
+        for item in items[:15]:
+            texto = await item.inner_text()
+            link_elem = await item.query_selector('a')
+            link = await link_elem.get_attribute('href') if link_elem else ""
+            if link:
+                resultados.append(f"INFO: {{texto.replace('\\n', ' ')}} | LINK: {{link}}")
         
-        if total:
-            # Imprimimos para que subprocess lo capture
-            print("---SEPARADOR---".join(total))
+        if resultados:
+            print("---SEPARADOR---".join(resultados))
         await browser.close()
 
 asyncio.run(run())
@@ -94,77 +52,34 @@ asyncio.run(run())
         f.write(codigo_extractor)
     
     try:
-        resultado = subprocess.check_output([sys.executable, script_temp], text=True, encoding="utf-8", errors="replace")
+        resultado = subprocess.check_output([sys.executable, script_temp], text=True, encoding="utf-8")
         return resultado.split("---SEPARADOR---") if resultado.strip() else []
-    except Exception as e:
-        print(f"Error en subprocess: {e}")
-        return []
     finally:
-        if os.path.exists(script_temp):
-            os.remove(script_temp)
+        if os.path.exists(script_temp): os.remove(script_temp)
 
-def comparar_con_ia(lista_productos, key):
+def procesar_con_ia(datos_web, key):
     client = Groq(api_key=key)
+    prompt = f"De estos resultados de Google, extrae un JSON con la llave 'productos'. Identifica: tienda, nombre del producto, precio en soles y enlace. Datos: {chr(10).join(datos_web)}"
     
-    # Reducimos la cantidad de datos para no saturar a la IA
-    datos_resumidos = "\n".join(lista_productos[:15]) 
-    
-    prompt = f"""
-    Actúa como un extractor de datos preciso. 
-    Tu tarea es convertir el texto de tiendas de Perú en un objeto JSON.
-    
-    Reglas estrictas:
-    1. Devuelve SOLAMENTE un JSON con la estructura: {{"productos": [{{"tienda": "", "nombre": "", "precio": 0, "enlace": ""}}]}}
-    2. El campo "precio" debe ser un número entero o decimal (sin "S/.", sin comas).
-    3. Si no encuentras el precio, pon null.
-    4. No añadas explicaciones ni texto fuera del JSON.
-    
-    Datos a procesar:
-    {datos_resumidos}
-    """
-    
-    try:
-        completion = client.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            model="llama-3.3-70b-versatile", # Modelo potente para seguir instrucciones
-            temperature=0.1, # Menos creatividad = más precisión en el formato
-            response_format={"type": "json_object"}
-        )
-        return completion.choices[0].message.content
-    except Exception as e:
-        print(f"Error en Groq: {e}")
-        return '{ "productos": [] }'
+    completion = client.chat.completions.create(
+        messages=[{"role": "user", "content": prompt}],
+        model="llama-3.3-70b-versatile",
+        response_format={"type": "json_object"}
+    )
+    return completion.choices[0].message.content
 
-producto_buscado = st.text_input("¿Qué producto buscas?", placeholder="Ej: Laptop, Smartwatch...")
+# --- INTERFAZ ---
+producto = st.text_input("¿Qué producto quieres comparar?")
 
-if st.button("🔍 Buscar"):
-    if producto_buscado:
-        try:
-            with st.spinner("Extrayendo datos en tiempo real..."):
-                bloques = buscar_y_extraer(producto_buscado)
-            
-            if bloques:
-                with st.spinner("IA comparando precios..."):
-                    respuesta_json = comparar_con_ia(bloques, API_KEY_DIRECTA)
-                    datos = json.loads(respuesta_json)
-                    lista = datos.get("productos", [])
-                    
-                    if lista:
-                        st.subheader(f"📊 Resultados encontrados")
-                        st.dataframe(
-                            lista,
-                            column_config={
-                                "enlace": st.column_config.LinkColumn("Ver Oferta"),
-                                "precio": st.column_config.NumberColumn("Soles", format="S/. %d"),
-                                "nombre": st.column_config.TextColumn("Producto", width="large")
-                            },
-                            hide_index=True,
-                            width="stretch"
-                        )
-                    else:
-                        st.warning("La IA no pudo procesar los datos. Intenta nuevamente.")
-            else:
-                st.error("Las tiendas (ML y Coolbox) bloquearon la conexión o no hay resultados.")
-        except Exception as e:
-            st.error(f"Error general: {e}")
-
+if st.button("🔍 Buscar en todo el internet"):
+    if producto:
+        with st.spinner("Rastreando la web..."):
+            bloques = buscar_en_la_web(producto)
+        
+        if bloques:
+            with st.spinner("IA analizando ofertas..."):
+                res_json = procesar_con_ia(bloques, API_KEY_DIRECTA)
+                datos = json.loads(res_json)
+                st.dataframe(datos.get("productos", []), hide_index=True, width="stretch")
+        else:
+            st.error("No se encontraron resultados en el buscador.")
