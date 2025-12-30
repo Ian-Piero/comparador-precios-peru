@@ -32,7 +32,7 @@ async def extraer_tienda(context, url, tienda, selector):
     try:
         await page.goto(url, wait_until="networkidle", timeout=45000)
 
-        # Scroll para cargar productos (Mercado Libre / Coolbox)
+        # Scroll para cargar productos
         for _ in range(3):
             await page.mouse.wheel(0, 3000)
             await page.wait_for_timeout(1200)
@@ -40,11 +40,11 @@ async def extraer_tienda(context, url, tienda, selector):
         try:
             await page.wait_for_selector(selector, timeout=20000)
         except:
-            print(f"NO_DATA::{tienda}")
+            print(f"NO_DATA::{{tienda}}")
             return []
 
         items = await page.query_selector_all(selector)
-        print(f"{tienda}: {{len(items)}} productos")
+        print(f"{{tienda}}: {{len(items)}} productos")
 
         for item in items[:6]:
             try:
@@ -64,13 +64,13 @@ async def extraer_tienda(context, url, tienda, selector):
 
                 if len(texto) > 60:
                     resultados.append(
-                        f"TIENDA:{tienda}|DATA:{texto[:500]}|LINK:{link}"
+                        f"TIENDA:{{tienda}}|DATA:{{texto[:500]}}|LINK:{{link}}"
                     )
             except:
                 continue
 
     except Exception as e:
-        print(f"ERROR::{tienda}::{e}")
+        print(f"ERROR::{{tienda}}::{{e}}")
     finally:
         await page.close()
 
@@ -103,7 +103,7 @@ async def run():
                 ".ui-search-result"
             ),
 
-            # Coolbox (VTEX)
+            # Coolbox
             extraer_tienda(
                 context,
                 f"https://www.coolbox.pe/{{q}}?_q={{q}}&map=ft",
@@ -173,8 +173,8 @@ Datos:
 
     completion = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"}
+        messages=[{{"role": "user", "content": prompt}}],
+        response_format={{"type": "json_object"}}
     )
 
     return completion.choices[0].message.content
@@ -205,7 +205,7 @@ if st.button("Buscar"):
                 st.subheader("📊 Comparación de precios")
                 st.dataframe(
                     productos,
-                    column_config={
+                    column_config={{
                         "enlace": st.column_config.LinkColumn("Link"),
                         "precio": st.column_config.NumberColumn(
                             "Precio (S/.)", format="S/. %d"
@@ -213,10 +213,10 @@ if st.button("Buscar"):
                         "nombre": st.column_config.TextColumn(
                             "Producto", width="large"
                         )
-                    },
+                    }},
                     hide_index=True,
                     width="stretch"
                 )
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error: {{e}}")
