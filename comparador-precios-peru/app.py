@@ -18,29 +18,22 @@ def buscar_y_extraer(producto):
     script_temp = "buscador_tech.py"
     
     codigo_extractor = f"""
-import asyncio
-from playwright.async_api import async_playwright
-
-async def extraer_tienda(context, url, tienda_nombre, selector_items):
-    page = await context.new_page()
-    resultados = []
-    try:
-        await page.goto(url, wait_until='domcontentloaded', timeout=30000)
-        await page.wait_for_timeout(3000) # Tiempo para carga de precios
-        
-        items = await page.query_selector_all(selector_items)
+items = await page.query_selector_all(selector_items)
         for item in items[:7]:
             texto = await item.inner_text()
+            # PASO 1: Limpiamos el texto aquí afuera para evitar el backslash dentro del f-string
+            texto_limpio = texto.replace('\n', ' ').strip()[:400]
+            
             link_elem = await item.query_selector('a')
             link = await link_elem.get_attribute('href') if link_elem else ""
             
-            # Normalización de enlaces
             if link and link.startswith('/'):
                 if "coolbox" in url: link = "https://www.coolbox.pe" + link
                 elif "hiraoka" in url: link = "https://hiraoka.com.pe" + link
             
-            if len(texto.strip()) > 30:
-                resultados.append(f"TIENDA: {{tienda_nombre}} | DATOS: {{texto.replace('\\n', ' ')[:400]}} | LINK: {{link}}")
+            if len(texto_limpio) > 30:
+                # PASO 2: Usamos la variable ya limpia aquí
+                resultados.append(f"TIENDA: {{tienda_nombre}} | DATOS: {{texto_limpio}} | LINK: {{link}}")
     except:
         pass
     finally:
@@ -133,3 +126,4 @@ if st.button("🔍 Buscar"):
                 st.error("No se encontraron resultados.")
         except Exception as e:
             st.error(f"Error: {e}")
+
