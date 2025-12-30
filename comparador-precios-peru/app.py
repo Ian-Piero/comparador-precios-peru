@@ -5,133 +5,218 @@ import os
 import json
 from groq import Groq
 
-# --- CONFIGURACIÓN ESTATICA ---
+# ================= CONFIG =================
 API_KEY_DIRECTA = "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"
 
-st.set_page_config(page_title="Comparador Tech Perú", page_icon="⚙️", layout="wide")
-st.title("⚙️ Comparador de productos")
-st.markdown("Buscando en tiendas con carga de datos directa.")
+st.set_page_config(
+    page_title="Comparador Tech Perú",
+    page_icon="⚙️",
+    layout="wide"
+)
 
+st.title("⚙️ Comparador de productos tecnológicos")
+st.markdown("Comparando precios en **Mercado Libre, Coolbox y Hiraoka**")
+
+# ============== SCRAPER ===================
 def buscar_y_extraer(producto):
-    script_temp = "buscador_tech.py"
-    
-    codigo_extractor = f"""
+    script_temp = "scraper_temp.py"
+
+    codigo = f'''
 import asyncio
 from playwright.async_api import async_playwright
 
-async def extraer_tienda(context, url, tienda_nombre, selector_items):
+async def extraer_tienda(context, url, tienda, selector):
     page = await context.new_page()
     resultados = []
+
     try:
-        # Aumentamos el tiempo de espera y usamos wait_until='networkidle' para tiendas pesadas
-        await page.goto(url, wait_until='domcontentloaded', timeout=30000)
-        
-        # Tiempo extra para que el JavaScript renderice los precios
-        await page.wait_for_timeout(5000) 
-        
-        items = await page.query_selector_all(selector_items)
-        for item in items[:8]:
+        await page.goto(url, wait_until="networkidle", timeout=45000)
+
+        # Scroll para cargar productos (Mercado Libre / Coolbox)
+        for _ in range(3):
+            await page.mouse.wheel(0, 3000)
+            await page.wait_for_timeout(1200)
+
+        try:
+            await page.wait_for_selector(selector, timeout=20000)
+        except:
+            print(f"NO_DATA::{tienda}")
+            return []
+
+        items = await page.query_selector_all(selector)
+        print(f"{tienda}: {{len(items)}} productos")
+
+        for item in items[:6]:
             try:
                 texto = await item.inner_text()
-                texto_limpio = texto.replace('\\n', ' ').replace('\\r', ' ').strip()[:500]
-                
-                link_elem = await item.query_selector('a')
-                link = await link_elem.get_attribute('href') if link_elem else ""
-                
-                if link and link.startswith('/'):
-                    if "coolbox" in url: link = "https://www.coolbox.pe" + link
-                    elif "hiraoka" in url: link = "https://hiraoka.com.pe" + link
-                
-                if len(texto_limpio) > 40:
-                    resultados.append(f"TIENDA: {{tienda_nombre}} | DATOS: {{texto_limpio}} | LINK: {{link}}")
+                texto = texto.replace("\\n", " ").strip()
+
+                link_elem = await item.query_selector("a")
+                link = await link_elem.get_attribute("href") if link_elem else ""
+
+                if link.startswith("/"):
+                    if "mercadolibre" in url:
+                        link = "https://www.mercadolibre.com.pe" + link
+                    elif "coolbox" in url:
+                        link = "https://www.coolbox.pe" + link
+                    elif "hiraoka" in url:
+                        link = "https://hiraoka.com.pe" + link
+
+                if len(texto) > 60:
+                    resultados.append(
+                        f"TIENDA:{tienda}|DATA:{texto[:500]}|LINK:{link}"
+                    )
             except:
                 continue
+
     except Exception as e:
-        print(f"Error en {{tienda_nombre}}: {{e}}")
+        print(f"ERROR::{tienda}::{e}")
     finally:
         await page.close()
+
     return resultados
+
 
 async def run():
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=True, 
-            args=['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage"
+            ]
         )
+
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         )
-        
-        q = "{producto.replace(' ', '+')}"
-        
-        # SELECTORES ACTUALIZADOS 2024/2025
+
+        q = "{producto}".replace(" ", "+")
+
         tareas = [
-            # Mercado Libre (Selector de lista y cuadrícula)
-            extraer_tienda(context, f"https://listado.mercadolibre.com.pe/{{q.replace('+', '-')}}", "Mercado Libre", ".ui-search-result__wrapper, .ui-search-result"),
-            
-            # Coolbox (Selector de su nueva plataforma VTEX)
-            extraer_tienda(context, f"https://www.coolbox.pe/{{q}}?_q={{q}}&map=ft", "Coolbox", ".vtex-search-result-3-x-galleryItem, section.vtex-product-summary-2-x-container"),
-            
+            # Mercado Libre
+            extraer_tienda(
+                context,
+                f"https://listado.mercadolibre.com.pe/{{q.replace('+','-')}}",
+                "Mercado Libre",
+                ".ui-search-result"
+            ),
+
+            # Coolbox (VTEX)
+            extraer_tienda(
+                context,
+                f"https://www.coolbox.pe/{{q}}?_q={{q}}&map=ft",
+                "Coolbox",
+                "section.vtex-product-summary-2-x-container"
+            ),
+
             # Hiraoka
-            extraer_tienda(context, f"https://hiraoka.com.pe/catalogsearch/result/?q={{q}}", "Hiraoka", ".product-item-info")
+            extraer_tienda(
+                context,
+                f"https://hiraoka.com.pe/catalogsearch/result/?q={{q}}",
+                "Hiraoka",
+                ".product-item-info"
+            )
         ]
-        
+
         listas = await asyncio.gather(*tareas)
-        total = [item for sublist in listas for item in sublist]
-        
+        total = [i for sub in listas for i in sub]
+
         if total:
-            print("---SEPARADOR---".join(total))
+            print("###".join(total))
+
         await browser.close()
 
 asyncio.run(run())
-"""
+'''
     with open(script_temp, "w", encoding="utf-8") as f:
-        f.write(codigo_extractor)
-    
+        f.write(codigo)
+
     try:
-        resultado = subprocess.check_output([sys.executable, script_temp], text=True, encoding="utf-8", errors="replace")
-        return resultado.split("---SEPARADOR---") if resultado.strip() else []
+        salida = subprocess.check_output(
+            [sys.executable, script_temp],
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
+        return salida.split("###") if salida.strip() else []
     finally:
         if os.path.exists(script_temp):
             os.remove(script_temp)
 
-def comparar_con_ia(lista_productos, key):
-    client = Groq(api_key=key)
-    prompt = f"Eres un experto en compras en Perú. Genera un JSON con la llave 'productos' conteniendo tienda, nombre, precio (en soles, solo números) y enlace. IMPORTANTE: Extrae información de todas las tiendas enviadas. Datos: {chr(10).join(lista_productos)}"
-    
+
+# ============== IA ===================
+def comparar_con_ia(datos, api_key):
+    client = Groq(api_key=api_key)
+
+    prompt = f"""
+Eres un experto en compras en Perú.
+Devuelve SOLO un JSON con esta estructura:
+
+{{
+  "productos": [
+    {{
+      "tienda": "",
+      "nombre": "",
+      "precio": 0,
+      "enlace": ""
+    }}
+  ]
+}}
+
+Extrae productos REALES.
+Si no hay precio, omite el producto.
+Datos:
+{chr(10).join(datos)}
+"""
+
     completion = client.chat.completions.create(
-        messages=[{"role": "user", "content": prompt}],
         model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
         response_format={"type": "json_object"}
     )
+
     return completion.choices[0].message.content
 
-producto_buscado = st.text_input("¿Qué producto buscas?", placeholder="Ej: iPhone 15, Laptop Gamer...")
 
-if st.button("🔍 Buscar"):
-    if producto_buscado:
+# ============== UI ===================
+producto = st.text_input(
+    "🔎 Producto a buscar",
+    placeholder="Ej: iPhone 15, Laptop Gamer, TV Samsung..."
+)
+
+if st.button("Buscar"):
+    if not producto:
+        st.warning("Ingresa un producto")
+    else:
         try:
-            with st.spinner("Buscando en Mercado Libre, Coolbox e Hiraoka..."):
-                bloques = buscar_y_extraer(producto_buscado)
-            
-            if bloques:
-                with st.spinner("Procesando con IA..."):
-                    respuesta_json = comparar_con_ia(bloques, API_KEY_DIRECTA)
-                    datos = json.loads(respuesta_json)
-                    lista = datos.get("productos", [])
-                    
-                    st.subheader(f"📊 Comparativa de Precios")
-                    st.dataframe(
-                        lista,
-                        column_config={
-                            "enlace": st.column_config.LinkColumn("Ir a tienda"),
-                            "precio": st.column_config.NumberColumn("Precio (S/.)", format="S/. %d"),
-                            "nombre": st.column_config.TextColumn("Producto", width="large")
-                        },
-                        hide_index=True,
-                        width="stretch"
-                    )
+            with st.spinner("Buscando en tiendas..."):
+                resultados = buscar_y_extraer(producto)
+
+            if not resultados:
+                st.error("No se encontraron resultados.")
             else:
-                st.error("No se obtuvieron datos de las tiendas. Intenta con un nombre más específico.")
+                with st.spinner("Procesando con IA..."):
+                    respuesta = comparar_con_ia(resultados, API_KEY_DIRECTA)
+                    data = json.loads(respuesta)
+                    productos = data.get("productos", [])
+
+                st.subheader("📊 Comparación de precios")
+                st.dataframe(
+                    productos,
+                    column_config={
+                        "enlace": st.column_config.LinkColumn("Link"),
+                        "precio": st.column_config.NumberColumn(
+                            "Precio (S/.)", format="S/. %d"
+                        ),
+                        "nombre": st.column_config.TextColumn(
+                            "Producto", width="large"
+                        )
+                    },
+                    hide_index=True,
+                    width="stretch"
+                )
+
         except Exception as e:
             st.error(f"Error: {e}")
